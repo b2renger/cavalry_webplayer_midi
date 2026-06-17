@@ -187,9 +187,13 @@
 <script>
 /* ============================================================
    CONFIG — where the Cavalry Web Player runtime lives.
+   Resolved relative to THIS page so it works from a GitHub Pages
+   sub-path (…/cavalry_webplayer_midi/), a custom domain, or localhost.
+   (An absolute "/wasm-lib" would point at the domain root and 404 on Pages.)
    ============================================================ */
-const WASM_JS  = "/wasm-lib/CavalryWasm.js";
-const WASM_LIB = "/wasm-lib";
+const BASE     = new URL(".", document.baseURI).href;   // directory of this page, e.g. https://user.github.io/repo/
+const WASM_JS  = BASE + "wasm-lib/CavalryWasm.js";
+const WASM_LIB = BASE + "wasm-lib";
 
 /* ============================================================
    STATE
