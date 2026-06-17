@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cavalry MIDI Player</title>
+<style>
+  :root{
+    --bg:#0d0d10; --panel:#16161a; --panel-2:#1e1e24; --panel-3:#26262d;
+    --border:#2c2c34; --border-2:#3a3a44;
+    --text:#ececf0; --muted:#9a9aa4; --faint:#6b6b74;
+    --accent:#8b80ff; --accent-dim:#5b51c9; --accent-soft:#221f3d;
+    --learn:#f5a623; --good:#27c093; --danger:#e05c5c;
+    --radius:12px; --radius-sm:8px;
+    --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:radial-gradient(1200px 800px at 70% -10%, #17171f 0%, var(--bg) 60%);
+    color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--accent-dim)}
+  .app{display:flex; flex-direction:column; height:100vh; max-width:1500px; margin:0 auto; padding:14px; gap:14px}
+
+  /* top bar */
+  .bar{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+  .brand{display:flex; align-items:center; gap:9px; margin-right:4px}
+  .brand .dot{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent)}
+  .brand h1{font-size:15px; font-weight:600; letter-spacing:.2px; margin:0}
+  .spacer{flex:1}
+  .pill{font-size:11px; font-weight:500; padding:4px 10px; border-radius:20px; background:var(--panel-2);
+        border:1px solid var(--border); color:var(--muted); display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+  .pill .led{width:7px; height:7px; border-radius:50%; background:var(--faint); transition:.15s}
+  .pill.on .led{background:var(--good); box-shadow:0 0 8px var(--good)}
+  .pill.off .led{background:var(--danger)}
+  .pill.flash .led{background:var(--accent); box-shadow:0 0 10px var(--accent)}
+
+  /* layout */
+  .grid{display:grid; grid-template-columns:1fr 420px; gap:14px; flex:1; min-height:0}
+  @media (max-width:980px){ .grid{grid-template-columns:1fr; overflow:auto} }
+  .col{display:flex; flex-direction:column; gap:14px; min-height:0}
+  .card{background:linear-gradient(180deg,var(--panel) 0%,#131318 100%); border:1px solid var(--border);
+        border-radius:var(--radius); padding:16px; display:flex; flex-direction:column; min-height:0}
+  .card h2{font-size:11px; font-weight:600; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:.09em}
+
+  /* controls */
+  button,.fbtn{font-family:var(--sans); font-size:13px; color:var(--text); background:var(--panel-2);
+        border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 13px; cursor:pointer;
+        transition:.12s; display:inline-flex; align-items:center; gap:7px; white-space:nowrap}
+  button:hover,.fbtn:hover{border-color:var(--border-2); background:var(--panel-3)}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.38; cursor:not-allowed; transform:none}
+  button.primary{background:linear-gradient(180deg,var(--accent) 0%,var(--accent-dim) 100%); border-color:var(--accent); color:#fff; font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  button.icon{padding:8px 11px; font-size:15px}
+  input[type=file]{display:none}
+  select{font-family:var(--sans); font-size:12px; color:var(--text); background:var(--panel-2);
+        border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 9px; max-width:200px}
+  select:hover{border-color:var(--border-2)}
+
+  /* stage */
+  .stage-card{flex:1; min-height:0}
+  .stage{flex:1; min-height:0; background:#000; border-radius:var(--radius-sm); overflow:hidden;
+        display:flex; align-items:center; justify-content:center; position:relative;
+        background-image:linear-gradient(45deg,#0a0a0c 25%,transparent 25%),linear-gradient(-45deg,#0a0a0c 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#0a0a0c 75%),linear-gradient(-45deg,transparent 75%,#0a0a0c 75%);
+        background-size:22px 22px; background-position:0 0,0 11px,11px -11px,-11px 0}
+  canvas{display:block; max-width:100%; max-height:100%; width:auto; height:auto; image-rendering:auto}
+  .stage .placeholder{position:absolute; color:var(--faint); font-size:13px; text-align:center; padding:24px; pointer-events:none}
+
+  /* transport */
+  .transport{display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap}
+  .scrub-row{display:flex; align-items:center; gap:10px; margin-top:10px}
+  .frame{font-family:var(--mono); font-size:12px; color:var(--muted); min-width:108px}
+  .frame b{color:var(--accent); font-weight:600}
+  input[type=range].scrub{flex:1}
+  .midi-transport{display:flex; align-items:center; gap:6px; margin-top:10px; flex-wrap:wrap; font-size:11px; color:var(--faint)}
+  .learnchip{font-size:10.5px; padding:3px 8px; border-radius:14px; background:var(--panel-2); border:1px dashed var(--border-2);
+        color:var(--muted); cursor:pointer; transition:.12s; font-family:var(--mono)}
+  .learnchip:hover{border-color:var(--accent); color:var(--text)}
+  .learnchip.bound{border-style:solid; border-color:var(--learn); color:var(--learn)}
+  .learnchip.armed{background:var(--learn); border-color:var(--learn); color:#241600; font-weight:600}
+  .learnchip.clear{border-style:solid; border-color:var(--border-2); color:var(--muted); padding:3px 7px}
+  .learnchip.clear:hover{border-color:var(--danger); color:var(--danger)}
+  .learnchip.apply{border-style:solid; border-color:var(--accent); color:var(--accent)}
+  .learnchip.apply:hover{background:var(--accent-soft); color:var(--text)}
+  .mapedit{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:7px 0 1px 26px; padding:6px 8px;
+        background:var(--panel); border:1px solid var(--border); border-radius:7px}
+  .mapedit-lbl{font-family:var(--mono); font-size:10px; color:var(--faint)}
+  .mapedit .comp-num{width:58px}
+
+  /* range slider styling */
+  input[type=range]{-webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
+        background:var(--panel-3); outline:none; cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+        background:var(--accent); border:2px solid #fff2; box-shadow:0 1px 4px #0008; transition:.1s}
+  input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15)}
+  input[type=range]::-moz-range-thumb{width:14px; height:14px; border:none; border-radius:50%; background:var(--accent)}
+  input[type=range].armed{background:linear-gradient(90deg,var(--learn),var(--panel-3))}
+  input[type=range].armed::-webkit-slider-thumb{background:var(--learn)}
+
+  /* attribute rows */
+  .list{overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px; min-height:0}
+  .list::-webkit-scrollbar{width:9px} .list::-webkit-scrollbar-thumb{background:var(--panel-3); border-radius:6px}
+  .row{background:var(--panel-2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:11px 12px}
+  .row-head{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap}
+  .row-name{font-size:13px; font-weight:600; color:var(--text)}
+  .row-type{font-size:10px; font-family:var(--mono); color:var(--faint); padding:1px 6px; border:1px solid var(--border); border-radius:10px}
+  .row-path{font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-top:2px; word-break:break-all}
+  .comp{display:grid; grid-template-columns:18px 1fr 64px auto; align-items:center; gap:8px; margin-top:9px}
+  .comp-label{font-family:var(--mono); font-size:11px; color:var(--muted); text-align:center}
+  .comp-num{font-family:var(--mono); font-size:11px; color:var(--text); background:var(--panel); border:1px solid var(--border);
+        border-radius:6px; padding:4px 6px; width:64px; text-align:right}
+  .comp-num:focus{outline:none; border-color:var(--accent)}
+  .swatches{display:flex; gap:5px; flex-wrap:wrap; margin-top:9px}
+  .swatch{width:22px; height:22px; border-radius:6px; border:2px solid transparent; cursor:pointer; transition:.1s;
+        box-shadow:inset 0 0 0 1px #fff2}
+  .swatch:hover{transform:translateY(-1px)}
+  .swatch.sel{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent)}
+  .colorbox{width:22px;height:22px;border-radius:6px;box-shadow:inset 0 0 0 1px #fff3}
+  .switch{position:relative; width:42px; height:23px; border-radius:14px; background:var(--panel-3); border:1px solid var(--border); cursor:pointer; transition:.15s}
+  .switch.on{background:var(--accent-dim); border-color:var(--accent)}
+  .switch .knob{position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:#fff; transition:.15s}
+  .switch.on .knob{left:21px}
+
+  .empty{color:var(--muted); font-size:13px; padding:30px 16px; text-align:center; line-height:1.7}
+  .log{font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-top:10px; max-height:88px; overflow-y:auto; white-space:pre-wrap}
+  .toast{position:fixed; bottom:18px; left:50%; transform:translateX(-50%) translateY(20px); opacity:0;
+        background:var(--panel-3); border:1px solid var(--border-2); color:var(--text); padding:9px 16px;
+        border-radius:20px; font-size:12.5px; box-shadow:0 8px 30px #000a; transition:.2s; pointer-events:none; z-index:50}
+  .toast.show{transform:translateX(-50%) translateY(0); opacity:1}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- top bar -->
+  <div class="bar">
+    <div class="brand"><span class="dot"></span><h1>Cavalry MIDI Player</h1></div>
+    <label class="fbtn"><input type="file" id="sceneFile" accept=".cv,.json,.txt" />📂 Load scene</label>
+    <button id="exportSvg" disabled title="Export the current frame as SVG (full-resolution raster snapshot — the web runtime can't emit vector)">⤓ SVG</button>
+    <button id="exportPng" disabled title="Export the current frame as PNG">⤓ PNG</button>
+    <span class="pill" id="scenePill"><span class="led"></span>No scene</span>
+    <div class="spacer"></div>
+    <span class="pill" id="midiPill"><span class="led"></span>MIDI …</span>
+    <select id="midiInput" title="MIDI input device"></select>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: stage + transport -->
+    <div class="col">
+      <div class="card stage-card">
+        <div class="stage" id="stageWrap">
+          <canvas id="stage" width="800" height="450"></canvas>
+          <div class="placeholder" id="placeholder">Load a Cavalry <code>.cv</code> scene to begin.<br>Its Control&nbsp;Centre attributes appear on the right.</div>
+        </div>
+        <div class="transport">
+          <button id="playBtn" class="primary icon" disabled title="Play">▶</button>
+          <button id="pauseBtn" class="icon" disabled title="Pause">⏸</button>
+          <button id="stopBtn" class="icon" disabled title="Stop &amp; rewind">⏹</button>
+          <button id="restartBtn" class="icon" disabled title="Restart">⟲</button>
+          <div class="spacer"></div>
+          <span class="frame" id="frameReadout">frame <b>0</b> / 0</span>
+        </div>
+        <div class="scrub-row">
+          <input type="range" class="scrub" id="scrub" min="0" max="100" value="0" disabled />
+        </div>
+        <div class="midi-transport" id="midiTransport"></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: attribute mapping -->
+    <div class="card">
+      <h2>Control Centre</h2>
+      <div class="list" id="list">
+        <div class="empty">Load a scene to list its Control&nbsp;Centre attributes.<br>
+          In Cavalry, add attributes to the Control&nbsp;Centre before exporting (scene&nbsp;version&nbsp;≥&nbsp;1.0.55).</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONFIG — where the Cavalry Web Player runtime lives.
+   ============================================================ */
+const WASM_JS  = "/wasm-lib/CavalryWasm.js";
+const WASM_LIB = "/wasm-lib";
+
+/* ============================================================
+   STATE
+   ============================================================ */
+let Module = null, player = null, surface = null, rafId = null;
+let ccList = [];                 // descriptors for control-centre attributes
+let frameRange = { min:0, max:100 };
+let midiAccess = null, activeInput = null;
+let sceneBase = null, sceneNodeMap = null;   // parsed scene JSON, for geometry rebuilds
+let rbTimer = null, rbPending = false, rbLast = 0;
+
+// bindings: array of { sig, midi:{kind,cc?|note?,channel}, target, last }
+//   target = {type:"attr", path, comp} | {type:"xport", action}
+let bindings = [];
+let learn = null;               // { target } when arming a learn; capture next message
+let armedEl = null;             // DOM element visually armed
+
+const canvas = document.getElementById("stage");
+const $ = id => document.getElementById(id);
+const els = {
+  log:$("log"), midiPill:$("midiPill"), scenePill:$("scenePill"), midiInput:$("midiInput"),
+  list:$("list"), play:$("playBtn"), pause:$("pauseBtn"), stop:$("stopBtn"), restart:$("restartBtn"),
+  scrub:$("scrub"), frame:$("frameReadout"), placeholder:$("placeholder"), toast:$("toast"),
+  exportSvg:$("exportSvg"), exportPng:$("exportPng"),
+};
+let currentSceneName = "frame";
+
+/* tiny DOM builder */
+function el(tag, props, ...kids){
+  const n = document.createElement(tag);
+  if(props) for(const k in props){
+    const v = props[k];
+    if(k === "class") n.className = v;
+    else if(k === "text") n.textContent = v;
+    else if(k === "html") n.innerHTML = v;
+    else if(k === "style" && typeof v === "object") Object.assign(n.style, v);
+    else if(k.slice(0,2) === "on" && typeof v === "function") n.addEventListener(k.slice(2).toLowerCase(), v);
+    else if(k === "dataset") Object.assign(n.dataset, v);
+    else n.setAttribute(k, v);
+  }
+  for(const c of kids){ if(c == null || c === false) continue; n.append(c.nodeType ? c : document.createTextNode(String(c))); }
+  return n;
+}
+function log(m){ els.log.textContent = (`${new Date().toLocaleTimeString()}  ${m}\n` + els.log.textContent).slice(0,3000); }
+let toastT = null;
+function toast(m){ els.toast.textContent = m; els.toast.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(()=>els.toast.classList.remove("show"), 1700); }
+
+/* ============================================================
+   WEB MIDI
+   ============================================================ */
+async function initMidi(){
+  if(!navigator.requestMIDIAccess){
+    els.midiPill.textContent = ""; els.midiPill.append(el("span",{class:"led"}), "MIDI unsupported");
+    els.midiPill.classList.add("off");
+    log("Web MIDI unavailable — use Chrome/Edge over https or localhost. Manual controls still work.");
+    return;
+  }
+  try{
+    midiAccess = await navigator.requestMIDIAccess({ sysex:false });
+    setPill(els.midiPill, "on", "MIDI ready");
+    refreshInputs();
+    midiAccess.onstatechange = refreshInputs;
+  }catch(e){
+    setPill(els.midiPill, "off", "MIDI denied");
+    log("MIDI access denied: " + e.message);
+  }
+}
+function setPill(p, cls, text){ p.className = "pill " + cls; p.innerHTML = ""; p.append(el("span",{class:"led"}), text); }
+function refreshInputs(){
+  const inputs = [...midiAccess.inputs.values()];
+  els.midiInput.innerHTML = "";
+  if(!inputs.length){ els.midiInput.append(el("option",{value:"",text:"No MIDI inputs"})); return; }
+  inputs.forEach(i => els.midiInput.append(el("option",{value:i.id, text:i.name})));
+  // keep current selection if still present, else pick first
+  const keep = activeInput && inputs.find(i => i.id === activeInput.id);
+  selectInput(keep ? activeInput.id : inputs[0].id);
+}
+function selectInput(id){
+  if(activeInput) activeInput.onmidimessage = null;
+  activeInput = [...midiAccess.inputs.values()].find(i => i.id === id) || null;
+  if(activeInput){ activeInput.onmidimessage = onMidi; els.midiInput.value = id; log("Listening to " + activeInput.name); }
+}
+els.midiInput.addEventListener("change", e => selectInput(e.target.value));
+
+function flashMidi(){ els.midiPill.classList.add("flash"); setTimeout(()=>els.midiPill.classList.remove("flash"), 90); }
+
+function onMidi(ev){
+  const [status, d1, d2] = ev.data;
+  const type = status & 0xF0, channel = status & 0x0F;
+  const isCC   = type === 0xB0;
+  const isNote = type === 0x90 && d2 > 0;          // note-on w/ velocity
+  if(!isCC && !isNote) return;
+  flashMidi();
+
+  // --- MIDI Learn: capture this control for the armed target ---
+  if(learn){
+    const midi = isCC ? {kind:"cc", cc:d1, channel} : {kind:"note", note:d1, channel};
+    bind(midi, learn.target);
+    clearLearn();
+    toast("Bound " + midiLabel(midi));
+    renderList(); renderTransportChips();
+    return;
+  }
+
+  // --- Route to every matching binding ---
+  for(const b of bindings){
+    const m = b.midi;
+    if(m.channel !== channel) continue;
+    if(m.kind === "cc" && isCC && m.cc === d1)        routeCC(b, d2 / 127);
+    else if(m.kind === "note" && isNote && m.note === d1) routeNote(b);
+  }
+}
+
+function sigOf(m){ return m.kind === "cc" ? `cc:${m.cc}:${m.channel}` : `note:${m.note}:${m.channel}`; }
+function keyOfTarget(t){ return t.type === "attr" ? `attr:${t.path}:${t.comp}` : `xport:${t.action}`; }
+function compRange(target){
+  const d = ccList.find(c => c.path === target.path);
+  const comp = d && d.comps.find(c => c.id === target.comp);
+  return comp ? { min:comp.min, max:comp.max } : { min:0, max:1 };
+}
+function bind(midi, target){
+  const s = sigOf(midi), tk = keyOfTarget(target);
+  const prev = bindings.find(b => keyOfTarget(b.target) === tk);   // re-learn keeps the custom range
+  bindings = bindings.filter(b => b.sig !== s && keyOfTarget(b.target) !== tk); // 1 control ↔ 1 target
+  const b = { sig:s, midi, target, last:0 };
+  if(target.type === "attr"){
+    const r = compRange(target);
+    b.lo = prev && isFinite(prev.lo) ? prev.lo : r.min;
+    b.hi = prev && isFinite(prev.hi) ? prev.hi : r.max;
+    b.invert = prev ? !!prev.invert : false;
+  }
+  bindings.push(b);
+}
+function unbindTarget(target){ const tk = keyOfTarget(target); bindings = bindings.filter(b => keyOfTarget(b.target) !== tk); }
+function bindingFor(target){ const tk = keyOfTarget(target); return bindings.find(b => keyOfTarget(b.target) === tk); }
+function clearBinding(target){ unbindTarget(target); renderList(); renderTransportChips(); toast("Mapping cleared"); }
+function midiLabel(m){ return m.kind === "cc" ? `CC ${m.cc}·ch${m.channel+1}` : `Note ${m.note}·ch${m.channel+1}`; }
+
+function armLearn(target, elRef){
+  if(learn && armedEl === elRef){ clearLearn(); return; }   // toggle off
+  clearLearn();
+  learn = { target }; armedEl = elRef;
+  if(elRef) elRef.classList.add("armed");
+  toast("Move a fader / press a pad to bind…");
+}
+function clearLearn(){ if(armedEl) armedEl.classList.remove("armed"); armedEl = null; learn = null; }
+
+function routeCC(b, norm){
+  const t = b.target;
+  if(t.type === "xport"){                  // CC as a switch: fire on rising edge past midpoint
+    const on = norm >= 0.5; if(on && b.last < 0.5) doTransport(t.action); b.last = norm; return;
+  }
+  const d = ccList.find(c => c.path === t.path); if(!d) return;
+  const comp = d.comps.find(c => c.id === t.comp); if(!comp) return;
+  b.norm = norm;                                   // remember fader position so "apply" can re-send with a new range
+  applyMapped(d, comp, b, norm);
+}
+// shared remap math: normalized fader pos (0..1) -> value within [lo,hi], optionally inverted
+function applyMapped(d, comp, b, norm){
+  const lo = isFinite(b.lo) ? b.lo : comp.min, hi = isFinite(b.hi) ? b.hi : comp.max;
+  const n = b.invert ? 1 - norm : norm;
+  applyComponent(d, comp, lo + n * (hi - lo));
+}
+// "Apply" button: adopt the remapped span as the component's working range so the
+// on-screen slider/number visibly reflect the remap, then push the value to the
+// renderer using the last fader position (or the value's spot in the old range).
+function applyRemap(d, comp, b){
+  let norm = b.norm;          // compute against the CURRENT range before we change it
+  if(norm == null){ const span = comp.max - comp.min; norm = span ? clamp((getComp(d, comp) - comp.min) / span, 0, 1) : 0; }
+
+  comp.min = Math.min(b.lo, b.hi);     // the slider now spans the remapped range
+  comp.max = Math.max(b.lo, b.hi);
+  const refs = d._els[comp.id];
+  if(refs){
+    const step = comp.isInt ? 1 : niceStep(comp.max - comp.min);
+    if(refs.range){ refs.range.min = comp.min; refs.range.max = comp.max; refs.range.step = step; }
+    if(refs.num){ refs.num.min = comp.min; refs.num.max = comp.max; refs.num.step = step; }
+  }
+
+  applyMapped(d, comp, b, norm);       // re-send + render; updateCompUI repositions the thumb/value
+  toast(`Remap applied · ${fmt(comp.min, comp.isInt)}…${fmt(comp.max, comp.isInt)}`);
+}
+function routeNote(b){
+  const t = b.target;
+  if(t.type === "xport"){ doTransport(t.action); return; }
+  const d = ccList.find(c => c.path === t.path); if(!d) return;
+  const comp = d.comps.find(c => c.id === t.comp); if(!comp) return;
+  // note toggles the component between the mapped min and max (good for bools & "kicks")
+  const lo = isFinite(b.lo) ? b.lo : comp.min, hi = isFinite(b.hi) ? b.hi : comp.max;
+  const cur = getComp(d, comp);
+  applyComponent(d, comp, cur >= (lo + hi) / 2 ? lo : hi);
+}
+
+/* ============================================================
+   RUNTIME LOAD + SCENE LOAD
+   ============================================================ */
+async function ensureModule(){
+  if(Module) return Module;
+  log("Loading Cavalry WASM runtime…");
+  const wasm = await import(WASM_JS);
+  Module = await wasm.default({ locateFile: p => `${WASM_LIB}/${p}` });
+  log("Runtime ready.");
+  return Module;
+}
+
+$("sceneFile").addEventListener("change", async e => {
+  const file = e.target.files[0]; if(!file) return;
+  try{
+    await ensureModule();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    Module.FS.writeFile("scene.cv", bytes);
+
+    // tear down previous player/surface
+    if(rafId){ cancelAnimationFrame(rafId); rafId = null; }
+    if(player){ try{ player.stop(); }catch(_){}; if(typeof player.delete === "function") player.delete(); player = null; }
+    if(surface && typeof surface.delete === "function"){ surface.delete(); surface = null; }
+
+    // parse JSON metadata (best-effort; runtime is authoritative for existence)
+    const parsed = safeParseScene(bytes);
+    sceneBase = parsed ? parsed.scene : null;          // kept for geometry rebuilds
+    sceneNodeMap = parsed ? parsed.nodeMap : null;
+    currentSceneName = file.name.replace(/\.[^.]+$/, "") || "frame";
+
+    player  = Module.Cavalry.MakeWithPath("scene.cv");
+
+    // size canvas to the scene resolution for a crisp 1:1 render (runtime first, JSON fallback)
+    const res = sceneResolution(parsed);
+    if(res){ canvas.width = res.x; canvas.height = res.y; }
+    surface = Module.makeWebGLSurfaceFromElement(canvas, canvas.width, canvas.height);
+
+    frameRange = probeFrameRange();
+    els.scrub.min = frameRange.min; els.scrub.max = frameRange.max; els.scrub.value = frameRange.min;
+
+    discover(parsed);
+    player.render(surface);         // initial draw (MakeWithPath already cooked the scene)
+
+    els.placeholder.style.display = "none";
+    setPill(els.scenePill, "on", file.name);
+    [els.play, els.pause, els.stop, els.restart, els.scrub, els.exportSvg, els.exportPng].forEach(b => b.disabled = false);
+    updateFrame(frameRange.min);
+    log(`Scene loaded: ${file.name} — ${ccList.length} attribute(s).`);
+  }catch(err){
+    console.error(err);
+    log("Load failed: " + err.message);
+    toast("Load failed — see log");
+  }
+});
+
+function probeFrameRange(){
+  try{                                                        // preferred: explicit range getters
+    if(typeof player.getStartFrame === "function" && typeof player.getEndFrame === "function"){
+      const lo = player.getStartFrame(), hi = player.getEndFrame();
+      if(isFinite(lo) && isFinite(hi) && hi >= lo) return { min:lo, max:hi };
+    }
+  }catch(_){}
+  let min = 0, max = 100;                                     // fallback: setFrame clamps to valid range
+  try{
+    const cur = (typeof player.getFrame === "function") ? player.getFrame() : 0;
+    if(typeof player.setFrame === "function"){
+      player.setFrame(1e7);
+      const hi = (typeof player.getFrame === "function") ? player.getFrame() : 0;
+      if(isFinite(hi) && hi > 0) max = hi;
+      player.setFrame(cur || 0);
+    }
+  }catch(_){}
+  return { min, max };
+}
+
+/* ============================================================
+   SCENE PARSER  (Cavalry .cv files are JSON)
+   ------------------------------------------------------------
+   Builds rich metadata: type, exact range, niceName, palette.
+   Falls back gracefully to the runtime when JSON is missing or
+   an attribute isn't serialized in the file.
+   ============================================================ */
+function safeParseScene(bytes){
+  try{
+    const text = new TextDecoder().decode(bytes).replace(/^﻿/, "");
+    const scene = JSON.parse(text);
+    if(!scene || typeof scene !== "object") return null;
+    const nodeMap = {};
+    for(const n of (Array.isArray(scene.nodes) ? scene.nodes : [])) if(n && n.nodeId) nodeMap[n.nodeId] = n;
+    // controlCenter (American) is the on-disk key; tolerate the British spelling too
+    const cc = scene.controlCenter || scene.controlCentre || {};
+    return { scene, nodeMap, controlCenter:cc, activeComp:scene.activeComp || null };
+  }catch(_){ return null; }   // not JSON (or unreadable) — runtime discovery will be used
+}
+
+function compResolution(parsed){
+  const id = parsed.activeComp; const node = id && parsed.nodeMap[id];
+  const r = node && node.attributes && node.attributes.resolution && node.attributes.resolution.value;
+  if(r && isFinite(r.x) && isFinite(r.y) && r.x > 0 && r.y > 0)
+    return { x:Math.round(r.x), y:Math.round(r.y) };
+  return null;
+}
+// runtime getSceneResolution() first (any scene), then the parsed JSON
+function sceneResolution(parsed){
+  try{
+    if(player && typeof player.getSceneResolution === "function"){
+      const r = player.getSceneResolution();
+      const x = r && (typeof r.x === "number" ? r.x : Array.isArray(r) ? r[0] : undefined);
+      const y = r && (typeof r.y === "number" ? r.y : Array.isArray(r) ? r[1] : undefined);
+      if(r && typeof r.delete === "function") r.delete();
+      if(isFinite(x) && isFinite(y) && x > 0 && y > 0) return { x:Math.round(x), y:Math.round(y) };
+    }
+  }catch(_){}
+  return parsed ? compResolution(parsed) : null;
+}
+
+function jsonControlPaths(parsed, preferComp){
+  const cc = parsed.controlCenter; if(!cc) return [];
+  // pick a single comp: the runtime's active comp first, then the file's, else
+  // (last resort) the union of every comp's Control Centre.
+  const id = (preferComp && cc[preferComp]) ? preferComp
+           : (parsed.activeComp && cc[parsed.activeComp]) ? parsed.activeComp : null;
+  const comps = id ? [cc[id]] : Object.values(cc);
+  const out = [];
+  for(const c of comps) for(const a of (c && Array.isArray(c.attributes) ? c.attributes : [])){
+    const p = typeof a === "string" ? a : a && a.path; if(p) out.push(p);
+  }
+  return [...new Set(out)];
+}
+
+/* Discover the control-centre attributes: runtime list is authoritative;
+   JSON supplies the rich metadata; runtime fills any gaps. */
+function discover(parsed){
+  ccList = [];
+  // keep transport binds (reset edge-detection state), drop stale attr binds
+  bindings = bindings.filter(b => b.target.type === "xport").map(b => ({ ...b, last:0 }));
+  clearLearn();
+
+  let paths = [], comp = null;
+  try{
+    comp = player.getActiveComp();
+    paths = toArray(player.getControlCentreAttributes(comp));
+  }catch(e){ log("Runtime getControlCentreAttributes failed: " + e.message); }
+  if(!paths.length && parsed){ paths = jsonControlPaths(parsed, comp); log("Using scene-file Control Centre list."); }
+
+  ccList = paths.map(p => describe(p, parsed)).filter(Boolean);
+  renderList(); renderTransportChips();
+}
+
+// Emscripten/embind may return a C++ vector (.size()/.get(i)) instead of a JS array.
+function toArray(v){
+  if(v == null) return [];
+  if(Array.isArray(v)) return v;
+  if(typeof v.size === "function" && typeof v.get === "function"){
+    const out = []; for(let i = 0; i < v.size(); i++) out.push(v.get(i));
+    if(typeof v.delete === "function") v.delete();
+    return out;
+  }
+  try{ return Array.from(v); }catch(_){ return [v]; }
+}
+
+function describe(path, parsed){
+  const fd = path.indexOf(".");
+  if(fd <= 0 || fd >= path.length - 1) return null;   // require "node.attr" with non-empty halves
+  const layer  = path.slice(0, fd);
+  const attrId = path.slice(fd + 1);
+  const node   = parsed && parsed.nodeMap[layer] || null;
+  const attrObj = node && node.attributes ? node.attributes[attrId] : null;
+  const niceName = (node && node.attributes && node.attributes.niceName && node.attributes.niceName.value) || layer;
+  const nodeType = (node && node.nodeType) || "";
+
+  // runtime probe (value + definition)
+  let rVal, hasR = false, def = null;
+  try{ rVal = player.getAttribute(layer, attrId); hasR = true; }catch(_){}
+  try{ def = player.getAttributeDefinition(layer, attrId); }catch(_){}
+
+  // variable type
+  let varType = (attrObj && attrObj.varType) || (def && def.type) || null;
+  if(!varType && hasR){
+    if(typeof rVal === "number") varType = "double";
+    else if(typeof rVal === "boolean") varType = "bool";
+    else if(Array.isArray(rVal)) varType = rVal.length >= 3 ? "double3" : "double2";
+    else if(rVal && typeof rVal === "object" && "r" in rVal) varType = "color";
+    else varType = "double";
+  }
+  varType = varType || "double";
+
+  const shape = /color/i.test(varType) ? "color"
+              : /bool/i.test(varType)  ? "bool"
+              : /3$/.test(varType)     ? "vec3"
+              : /2$/.test(varType)     ? "vec2" : "scalar";
+  const isInt = /int|enum/i.test(varType) || /int|enum/i.test((def && def.type) || "");
+
+  // current value (JSON first, then runtime, then default)
+  let current = valToCurrent(attrObj && attrObj.value, shape);
+  if(current == null && hasR) current = valToCurrent(rVal, shape);
+  if(current == null) current = defaultFor(shape);
+
+  // palette for {color,value}Array index selectors: the `array` is a SIBLING
+  // attribute on the node (node.attributes.array), not a child of arrayIndex.
+  const arr = node && node.attributes && node.attributes.array && Array.isArray(node.attributes.array.list)
+            ? node.attributes.array.list : null;
+  const arrayLen = arr ? arr.length : undefined;
+  const swatches = nodeType === "colorArray" && arr ? arr.map(c => c.value).filter(Boolean) : null;
+
+  const comps = buildComponents({ shape, isInt, attrObj, def, attrId, niceName, arrayLen });
+  const d = { path, layer, attrId, niceName, nodeType, varType, shape, isInt, current, arrayLen, swatches, comps, _els:{} };
+  return d;
+}
+
+function valToCurrent(v, shape){
+  if(v == null) return null;
+  if(shape === "scalar") return typeof v === "number" ? v : (typeof v === "object" && typeof v.numValue === "number" ? v.numValue : null);
+  if(shape === "bool")   return !!v;
+  if(shape === "vec2" || shape === "vec3"){
+    const n = shape === "vec3" ? 3 : 2;
+    if(Array.isArray(v)) return pad(v.map(Number), n);
+    if(typeof v === "object") return pad([v.x, v.y, v.z].map(Number), n);
+    return null;
+  }
+  if(shape === "color"){
+    const C = (r,g,b,a) => ({ r:clamp(Math.round(+r||0),0,255), g:clamp(Math.round(+g||0),0,255),
+                              b:clamp(Math.round(+b||0),0,255), a:clamp(Math.round(a==null?255:(+a||0)),0,255) });
+    if(Array.isArray(v)) return C(v[0], v[1], v[2], v[3]);   // array check first — arrays are objects
+    if(typeof v === "object") return C(v.r, v.g, v.b, v.a);
+    return null;
+  }
+  return null;
+}
+function pad(a, n){ const o = []; for(let i=0;i<n;i++) o[i] = isFinite(a[i]) ? a[i] : 0; return o; }
+function defaultFor(shape){
+  return shape === "vec3" ? [0,0,0] : shape === "vec2" ? [0,0]
+       : shape === "color" ? { r:255,g:255,b:255,a:255 } : shape === "bool" ? false : 0;
+}
+
+/* ---- range resolution ---- */
+function numOr(...xs){ for(const x of xs) if(typeof x === "number" && isFinite(x)) return x; return undefined; }
+function rangeFromOverrides(ov){
+  if(!ov) return null;
+  const lo = numOr(ov.softMin, ov.hardMin), hi = numOr(ov.softMax, ov.hardMax);
+  return (lo !== undefined && hi !== undefined && hi > lo) ? { min:lo, max:hi } : null;
+}
+function rangeFromDef(ni){
+  if(!ni) return null;
+  const lo = numOr(ni.softMin, ni.hardMin), hi = numOr(ni.softMax, ni.hardMax);
+  return (lo !== undefined && hi !== undefined && hi > lo) ? { min:lo, max:hi } : null;
+}
+function heuristicRange(attrId, niceName, isInt, arrayLen){
+  const s = (attrId + " " + niceName).toLowerCase();
+  if(arrayLen && /index/.test(attrId.toLowerCase())) return { min:0, max:arrayLen - 1 };
+  if(/opacity|alpha/.test(s))                         return { min:0, max:100 };
+  if(/rotation|angle|bend|skew/.test(s))              return { min:-180, max:180 };
+  if(/scale/.test(s))                                 return { min:0, max:200 };
+  if(/count|index|seed|division|divisions/.test(s))   return { min:0, max:20 };
+  if(/position|translat|offset|size|width|height|radius|length|distance/.test(s)) return { min:-1000, max:1000 };
+  return isInt ? { min:0, max:20 } : { min:0, max:100 };
+}
+function scalarRange(attrObj, def, attrId, niceName, isInt, arrayLen){
+  return rangeFromOverrides(attrObj && attrObj.definitionOverrides)
+      || rangeFromDef(def && def.numericInfo)
+      || heuristicRange(attrId, niceName, isInt, arrayLen);
+}
+function axisRange(attrObj, def, axisKey, idx, attrId, niceName, isInt){
+  const child = attrObj && attrObj.childDefinitionOverrides && attrObj.childDefinitionOverrides[axisKey];
+  const r = rangeFromOverrides(child)
+         || rangeFromDef(def && def.children && def.children[idx] && def.children[idx].numericInfo);
+  return r || heuristicRange(attrId, niceName, isInt, undefined);
+}
+
+function buildComponents({ shape, isInt, attrObj, def, attrId, niceName, arrayLen }){
+  if(shape === "scalar"){
+    const r = scalarRange(attrObj, def, attrId, niceName, isInt, arrayLen);
+    return [{ id:"v", label:"", kind:"scalar", isInt, min:r.min, max:r.max }];
+  }
+  if(shape === "bool")
+    return [{ id:"v", label:"", kind:"bool", isInt:true, min:0, max:1 }];
+  if(shape === "vec2" || shape === "vec3"){
+    const keys = shape === "vec3" ? ["x","y","z"] : ["x","y"];
+    return keys.map((k, i) => {
+      const r = axisRange(attrObj, def, k, i, attrId, niceName, isInt);
+      return { id:k, label:k.toUpperCase(), kind:"axis", axis:i, isInt, min:r.min, max:r.max };
+    });
+  }
+  if(shape === "color")
+    return ["r","g","b","a"].map(k => ({ id:k, label:k.toUpperCase(), kind:"color", chan:k, isInt:true, min:0, max:255 }));
+  return [];
+}
+
+/* ============================================================
+   APPLYING VALUES  (manual UI and MIDI share this path)
+   ============================================================ */
+function getComp(d, comp){
+  if(comp.kind === "bool")  return d.current ? 1 : 0;
+  if(comp.kind === "axis")  return d.current[comp.axis];
+  if(comp.kind === "color") return d.current[comp.chan];
+  return d.current;
+}
+function setComp(d, comp, v){
+  if(comp.kind === "bool"){ d.current = v >= 0.5; return; }
+  if(comp.kind === "scalar"){ d.current = comp.isInt ? Math.round(v) : v; return; }
+  if(comp.kind === "axis"){ if(!Array.isArray(d.current)) d.current = defaultFor(d.shape); d.current[comp.axis] = comp.isInt ? Math.round(v) : v; return; }
+  if(comp.kind === "color"){ d.current[comp.chan] = clamp(Math.round(v), 0, 255); return; }
+}
+function clamp(v, lo, hi){ return v < lo ? lo : v > hi ? hi : v; }
+
+function toRuntimeValue(d){
+  if(d.shape === "scalar") return d.isInt ? Math.round(d.current) : d.current;
+  if(d.shape === "bool")   return !!d.current;
+  if(d.shape === "color")  return { r:c255(d.current.r), g:c255(d.current.g), b:c255(d.current.b), a:c255(d.current.a) };
+  // vec
+  return d.current.map(n => d.isInt ? Math.round(n) : n);
+}
+function c255(v){ return clamp(Math.round(+v||0), 0, 255); }
+
+function commit(d){
+  if(!player) return;
+  try{
+    // Live set: material/colour attributes update on the very next render (instant feedback).
+    player.setAttribute(d.layer, d.attrId, toRuntimeValue(d));
+    if(player.isPlaying && player.isPlaying()){ /* tick loop draws */ }
+    else player.render(surface);
+    // Geometry-driving attributes (deformers, distributions, duplicators, look-at targets)
+    // change the DATA but the runtime never re-cooks the geometry from an in-place setAttribute
+    // (verified: getAttribute reflects the new value, the render does not). The only thing that
+    // re-cooks is loading the scene, so we bake current values into the scene JSON and reload —
+    // throttled, so dragging a fader doesn't reload on every event.
+    scheduleRebuild();
+  }catch(e){ log(`setAttribute failed (${d.path}): ${e.message}`); }
+}
+
+/* ---- geometry rebuild: bake current Control Centre values into the scene + MakeWithPath ---- */
+function toSceneValue(d){
+  if(d.shape === "scalar") return d.isInt ? Math.round(d.current) : d.current;
+  if(d.shape === "bool")   return !!d.current;
+  if(d.shape === "color")  return { r:c255(d.current.r), g:c255(d.current.g), b:c255(d.current.b), a:c255(d.current.a) };
+  if(d.shape === "vec2")   return { x:d.current[0], y:d.current[1] };
+  if(d.shape === "vec3")   return { x:d.current[0], y:d.current[1], z:d.current[2] };
+  return d.current;
+}
+function bakeInto(scene, nodeMap, d){
+  const node = nodeMap[d.layer]; if(!node) return;
+  node.attributes = node.attributes || {};
+  const seg = d.attrId.split(".");                       // support a compound child path like "position.x"
+  if(seg.length === 1){
+    const a = node.attributes[d.attrId] || (node.attributes[d.attrId] = { varType:d.varType });
+    a.value = toSceneValue(d);
+  } else {
+    const a = node.attributes[seg[0]]; if(!a || a.value == null || typeof a.value !== "object") return;
+    a.value[seg[1]] = d.isInt ? Math.round(d.current) : d.current;
+  }
+}
+function scheduleRebuild(){
+  if(!sceneBase || !sceneNodeMap) return;               // non-JSON scene: can't rebuild geometry
+  rbPending = true;
+  if(rbTimer) return;
+  const gap = (player && player.isPlaying && player.isPlaying()) ? 220 : 45;  // gentler while playing
+  const wait = Math.max(0, gap - (performance.now() - rbLast));
+  rbTimer = setTimeout(fireRebuild, wait);
+}
+function fireRebuild(){
+  rbTimer = null;
+  if(!rbPending) return;
+  rbPending = false; rbLast = performance.now();
+  rebuild();
+}
+function rebuild(){
+  if(!sceneBase || !sceneNodeMap || !Module || !player) return;
+  try{
+    for(const d of ccList) bakeInto(sceneBase, sceneNodeMap, d);   // bake all current values
+    Module.FS.writeFile("scene.cv", JSON.stringify(sceneBase));
+    const wasPlaying = player.isPlaying && player.isPlaying();
+    const f = (typeof player.getFrame === "function") ? player.getFrame() : frameRange.min;
+    if(typeof player.delete === "function") player.delete();
+    player = Module.Cavalry.MakeWithPath("scene.cv");
+    if(typeof player.setFrame === "function") player.setFrame(f);
+    if(wasPlaying){ player.play(); startLoop(); }
+    else player.render(surface);
+  }catch(e){ log("rebuild failed: " + e.message); }
+}
+
+/* set one component, push to runtime, refresh that control's UI */
+function applyComponent(d, comp, value){
+  if(!isFinite(value)) return;
+  // No range clamp here: send exactly what the slider/number/remap produces so values
+  // beyond the attribute's default range still reach the renderer. (setComp clamps colour
+  // channels to 0..255; the runtime enforces its own hard limits.)
+  setComp(d, comp, value);
+  commit(d);
+  updateCompUI(d, comp);
+}
+
+/* ============================================================
+   UI — attribute list with live manual controls + MIDI learn
+   ============================================================ */
+function renderList(){
+  els.list.innerHTML = "";
+  if(!ccList.length){
+    els.list.append(el("div",{class:"empty"},"No Control Centre attributes in this scene.",
+      el("br"),"Add attributes to the Control Centre in Cavalry, then re-export."));
+    return;
+  }
+  for(const d of ccList) els.list.append(makeRow(d));
+}
+
+function makeRow(d){
+  d._els = {};
+  const head = el("div",{class:"row-head"},
+    el("span",{class:"row-name", text:d.niceName}),
+    el("span",{class:"row-type", text:d.varType + (d.isInt && d.shape==="scalar" ? " · int" : "")}),
+  );
+  const row = el("div",{class:"row"}, head, el("div",{class:"row-path", text:d.path}));
+
+  // colorArray palette selector → clickable swatches that set the index component
+  if(d.swatches && d.swatches.length && d.comps[0]){
+    const comp = d.comps[0];
+    const strip = el("div",{class:"swatches"});
+    d.swatches.forEach((c, i) => {
+      const sw = el("div",{class:"swatch", title:"index " + i, style:{ background:cssColor(c) },
+        onclick:()=>applyComponent(d, comp, i)});
+      strip.append(sw);
+    });
+    d._els.swatchStrip = strip;
+    row.append(strip);
+    addComp(row, d, comp, () => makeCompControl(d, comp, false));
+    markSwatch(d);
+    return row;
+  }
+
+  if(d.shape === "bool"){ addComp(row, d, d.comps[0], () => makeBoolControl(d, d.comps[0])); return row; }
+  for(const comp of d.comps) addComp(row, d, comp, () => makeCompControl(d, comp, false));
+  if(d.shape === "color") row.append(colorPreview(d));
+  return row;
+}
+
+// append a component control followed by its remap editor (shown only when bound)
+function addComp(row, d, comp, maker){
+  row.append(maker());
+  const ed = mapEditor(d, comp);
+  if(ed) row.append(ed);
+}
+
+// remap editor: custom fader span (min/max), invert, and clear — appears under a bound component
+function mapEditor(d, comp){
+  const target = { type:"attr", path:d.path, comp:comp.id };
+  const b = bindingFor(target);
+  if(!b) return null;
+  const ed = el("div",{class:"mapedit"}, el("span",{class:"mapedit-lbl", text:"↳ remap"}));
+  if(comp.kind !== "bool"){
+    const step = comp.isInt ? 1 : niceStep(comp.max - comp.min);
+    const loIn = el("input",{ class:"comp-num", type:"number", value:fmt(b.lo, comp.isInt), step, title:"value at fader minimum",
+      onchange:e => { const x = parseFloat(e.target.value); if(isFinite(x)) b.lo = comp.isInt ? Math.round(x) : x; } });
+    const hiIn = el("input",{ class:"comp-num", type:"number", value:fmt(b.hi, comp.isInt), step, title:"value at fader maximum",
+      onchange:e => { const x = parseFloat(e.target.value); if(isFinite(x)) b.hi = comp.isInt ? Math.round(x) : x; } });
+    const inv = el("span",{ class:"learnchip" + (b.invert ? " bound":""), title:"invert direction", text:"⇅",
+      onclick:e => { b.invert = !b.invert; e.currentTarget.classList.toggle("bound", b.invert); } });
+    const apply = el("span",{ class:"learnchip apply", title:"apply this remap to the value now", text:"apply",
+      onclick:()=>applyRemap(d, comp, b) });
+    ed.append(el("span",{class:"mapedit-lbl", text:"min"}), loIn, el("span",{class:"mapedit-lbl", text:"max"}), hiIn, inv, apply);
+  }
+  ed.append(el("span",{ class:"learnchip clear", title:"remove mapping", text:"✕", onclick:()=>clearBinding(target) }));
+  return ed;
+}
+
+function makeCompControl(d, comp, hideSlider){
+  const step = comp.isInt ? 1 : niceStep(comp.max - comp.min);
+  const v = getComp(d, comp);
+  const range = el("input",{ type:"range", min:comp.min, max:comp.max, step, value:v,
+    oninput:e => applyComponent(d, comp, parseFloat(e.target.value)) });
+  const num = el("input",{ class:"comp-num", type:"number", min:comp.min, max:comp.max, step, value:fmt(v, comp.isInt),
+    onchange:e => { const x = parseFloat(e.target.value); if(isFinite(x)) applyComponent(d, comp, x); } });
+  const learnBtn = el("span",{ class:"learnchip", title:"MIDI Learn",
+    onclick:e => armLearn({ type:"attr", path:d.path, comp:comp.id }, e.currentTarget) });
+  d._els[comp.id] = { range, num, learn:learnBtn };
+  refreshLearnChip(d, comp);
+  return el("div",{class:"comp"}, el("span",{class:"comp-label", text:comp.label}), range, num, learnBtn);
+}
+
+function makeBoolControl(d, comp){
+  const sw = el("div",{ class:"switch" + (d.current ? " on":""),
+    onclick:()=>applyComponent(d, comp, d.current ? 0 : 1) });
+  sw.append(el("div",{class:"knob"}));
+  const learnBtn = el("span",{ class:"learnchip", title:"MIDI Learn (pad toggles)",
+    onclick:e => armLearn({ type:"attr", path:d.path, comp:comp.id }, e.currentTarget) });
+  d._els[comp.id] = { sw, learn:learnBtn };
+  refreshLearnChip(d, comp);
+  return el("div",{class:"comp", style:{gridTemplateColumns:"auto 1fr auto"}},
+    el("span",{class:"comp-label", text:"on"}), sw, learnBtn);
+}
+
+function colorPreview(d){
+  const box = el("div",{class:"colorbox"});
+  d._els.colorbox = box; updateColorBox(d);
+  return el("div",{class:"comp", style:{gridTemplateColumns:"auto auto"}},
+    el("span",{class:"comp-label", text:"="}), box);
+}
+
+function updateCompUI(d, comp){
+  const refs = d._els[comp.id]; if(!refs) return;
+  const v = getComp(d, comp);
+  if(refs.range){ refs.range.value = v; }
+  if(refs.num){ refs.num.value = fmt(v, comp.isInt); }
+  if(refs.sw){ refs.sw.classList.toggle("on", !!d.current); }
+  if(d.shape === "color") updateColorBox(d);
+  if(d.swatches) markSwatch(d);
+}
+function updateColorBox(d){ if(d._els.colorbox) d._els.colorbox.style.background = cssColor(d.current); }
+function markSwatch(d){
+  if(!d._els.swatchStrip) return;
+  const idx = Math.round(getComp(d, d.comps[0]));
+  [...d._els.swatchStrip.children].forEach((c,i)=>c.classList.toggle("sel", i === idx));
+}
+function refreshLearnChip(d, comp){
+  const refs = d._els[comp.id]; if(!refs || !refs.learn) return;
+  const b = bindingFor({ type:"attr", path:d.path, comp:comp.id });
+  refs.learn.classList.toggle("bound", !!b);
+  refs.learn.textContent = b ? midiLabel(b.midi) : "learn";
+  if(refs.range) refs.range.classList.toggle("armed", !!(learn && learn.target.path===d.path && learn.target.comp===comp.id));
+}
+
+function cssColor(c){ if(!c) return "#000"; return `rgba(${c255(c.r)},${c255(c.g)},${c255(c.b)},${clamp((c.a==null?255:c.a)/255,0,1)})`; }
+function niceStep(span){ span = Math.abs(span); if(span <= 2) return 0.001; if(span <= 20) return 0.01; if(span <= 200) return 0.1; return 1; }
+function fmt(v, isInt){ return isInt ? String(Math.round(v)) : String(Math.round(v * 1000) / 1000); }
+
+/* ---- transport MIDI chips ---- */
+function renderTransportChips(){
+  const wrap = $("midiTransport"); if(!wrap) return;
+  wrap.innerHTML = "";
+  wrap.append(el("span",{text:"MIDI pads →"}));
+  for(const [action, label] of [["play","play"],["toggle","play/pause"],["stop","stop"],["restart","restart"]]){
+    const target = { type:"xport", action };
+    const b = bindingFor(target);
+    wrap.append(el("span",{ class:"learnchip" + (b ? " bound":""), text:`${label}: ${b ? midiLabel(b.midi) : "—"}`,
+      onclick:e => armLearn(target, e.currentTarget) }));
+    if(b) wrap.append(el("span",{ class:"learnchip clear", text:"✕", title:"remove", onclick:()=>clearBinding(target) }));
+  }
+}
+
+/* ============================================================
+   TRANSPORT + RENDER LOOP
+   ============================================================ */
+function startLoop(){
+  if(rafId) cancelAnimationFrame(rafId);
+  const tick = ts => {
+    if(!player || !player.isPlaying()){ rafId = null; return; }
+    const st = player.tick(surface, ts);
+    if(st && st.frameChanged) updateFrame(st.currentFrame);
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+}
+function stopRaf(){ if(rafId){ cancelAnimationFrame(rafId); rafId = null; } }
+// stop() halts the engine but never repaints (no auto dirty-flag) — render so the
+// canvas reflects the paused frame, and kill the loop immediately.
+function pausePlayback(){ player.stop(); stopRaf(); player.render(surface); }
+function doTransport(action){
+  if(!player) return;
+  if(action === "play"){ player.play(); startLoop(); }
+  else if(action === "stop"){ player.stop(); stopRaf(); if(player.setFrame) player.setFrame(frameRange.min); player.render(surface); updateFrame(frameRange.min); }
+  else if(action === "pause"){ pausePlayback(); }
+  else if(action === "restart"){ if(player.setFrame) player.setFrame(frameRange.min); player.render(surface); updateFrame(frameRange.min); player.play(); startLoop(); }
+  else if(action === "toggle"){ if(player.isPlaying()) pausePlayback(); else { player.play(); startLoop(); } }
+}
+function updateFrame(f){
+  f = Math.round(f);
+  els.frame.innerHTML = `frame <b>${f}</b> / ${Math.round(frameRange.max)}`;
+  els.scrub.value = f;
+}
+els.play.addEventListener("click", ()=>doTransport("play"));
+els.pause.addEventListener("click", ()=>doTransport("pause"));
+els.stop.addEventListener("click", ()=>doTransport("stop"));
+els.restart.addEventListener("click", ()=>doTransport("restart"));
+els.scrub.addEventListener("input", e => {
+  const f = parseInt(e.target.value, 10);
+  if(player && player.setFrame){ player.setFrame(f); player.render(surface); updateFrame(f); }
+});
+
+/* ============================================================
+   EXPORT — capture the current frame.
+   The Web Player is a raster renderer (it imports SVG but can't emit vector),
+   so "SVG" wraps the rendered frame as a full-resolution image inside an .svg.
+   For editable vector, export from the Cavalry desktop app instead.
+   ============================================================ */
+function captureFramePNG(){
+  if(!player || !surface) return null;
+  try{
+    player.render(surface);                         // ensure the buffer holds the current frame
+    return canvas.toDataURL("image/png");           // grabbed synchronously, before the buffer clears
+  }catch(e){ log("export failed: " + e.message); toast("Export failed — see log"); return null; }
+}
+function exportName(ext){
+  const f = (player && typeof player.getFrame === "function") ? Math.round(player.getFrame()) : 0;
+  return `${currentSceneName}_f${f}.${ext}`;
+}
+function triggerDownload(href, name, revoke){
+  const a = el("a", { href, download: name }); document.body.append(a); a.click(); a.remove();
+  if(revoke) setTimeout(() => URL.revokeObjectURL(href), 2000);
+}
+function exportPNG(){
+  const url = captureFramePNG(); if(!url) return;
+  triggerDownload(url, exportName("png"));
+  toast("PNG exported");
+}
+function exportSVG(){
+  const url = captureFramePNG(); if(!url) return;
+  const w = canvas.width, h = canvas.height;
+  const svg =
+`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <image width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet" xlink:href="${url}"/>
+</svg>`;
+  const blobUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  triggerDownload(blobUrl, exportName("svg"), true);
+  toast("SVG exported (raster snapshot)");
+}
+els.exportPng.addEventListener("click", exportPNG);
+els.exportSvg.addEventListener("click", exportSVG);
+
+/* ---- go ---- */
+initMidi();
+renderTransportChips();
+</script>
+</body>
+</html>
